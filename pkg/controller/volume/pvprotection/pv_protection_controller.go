@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"k8s.io/api/core/v1"
-	apierrs "k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	coreinformers "k8s.io/client-go/informers/core/v1"
@@ -29,9 +29,9 @@ import (
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/component-base/metrics/prometheus/ratelimiter"
 	"k8s.io/klog"
-	"k8s.io/kubernetes/pkg/controller"
-	"k8s.io/kubernetes/pkg/util/metrics"
+	"k8s.io/kubernetes/pkg/controller/volume/protectionutil"
 	"k8s.io/kubernetes/pkg/util/slice"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 )
@@ -58,7 +58,7 @@ func NewPVProtectionController(pvInformer coreinformers.PersistentVolumeInformer
 		storageObjectInUseProtectionEnabled: storageObjectInUseProtectionFeatureEnabled,
 	}
 	if cl != nil && cl.CoreV1().RESTClient().GetRateLimiter() != nil {
-		metrics.RegisterMetricAndTrackRateLimiterUsage("persistentvolume_protection_controller", cl.CoreV1().RESTClient().GetRateLimiter())
+		ratelimiter.RegisterMetricAndTrackRateLimiterUsage("persistentvolume_protection_controller", cl.CoreV1().RESTClient().GetRateLimiter())
 	}
 
 	e.pvLister = pvInformer.Lister()
@@ -81,7 +81,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}) {
 	klog.Infof("Starting PV protection controller")
 	defer klog.Infof("Shutting down PV protection controller")
 
-	if !controller.WaitForCacheSync("PV protection", stopCh, c.pvListerSynced) {
+	if !cache.WaitForNamedCacheSync("PV protection", stopCh, c.pvListerSynced) {
 		return
 	}
 
@@ -127,7 +127,7 @@ func (c *Controller) processPV(pvName string) error {
 	}()
 
 	pv, err := c.pvLister.Get(pvName)
-	if apierrs.IsNotFound(err) {
+	if apierrors.IsNotFound(err) {
 		klog.V(4).Infof("PV %s not found, ignoring", pvName)
 		return nil
 	}
@@ -135,7 +135,7 @@ func (c *Controller) processPV(pvName string) error {
 		return err
 	}
 
-	if isDeletionCandidate(pv) {
+	if protectionutil.IsDeletionCandidate(pv, volumeutil.PVProtectionFinalizer) {
 		// PV should be deleted. Check if it's used and remove finalizer if
 		// it's not.
 		isUsed := c.isBeingUsed(pv)
@@ -144,7 +144,7 @@ func (c *Controller) processPV(pvName string) error {
 		}
 	}
 
-	if needToAddFinalizer(pv) {
+	if protectionutil.NeedToAddFinalizer(pv, volumeutil.PVProtectionFinalizer) {
 		// PV is not being deleted -> it should have the finalizer. The
 		// finalizer should be added by admission plugin, this is just to add
 		// the finalizer to old PVs that were created before the admission
@@ -202,15 +202,7 @@ func (c *Controller) pvAddedUpdated(obj interface{}) {
 	}
 	klog.V(4).Infof("Got event on PV %s", pv.Name)
 
-	if needToAddFinalizer(pv) || isDeletionCandidate(pv) {
+	if protectionutil.NeedToAddFinalizer(pv, volumeutil.PVProtectionFinalizer) || protectionutil.IsDeletionCandidate(pv, volumeutil.PVProtectionFinalizer) {
 		c.queue.Add(pv.Name)
 	}
-}
-
-func isDeletionCandidate(pv *v1.PersistentVolume) bool {
-	return pv.ObjectMeta.DeletionTimestamp != nil && slice.ContainsString(pv.ObjectMeta.Finalizers, volumeutil.PVProtectionFinalizer, nil)
-}
-
-func needToAddFinalizer(pv *v1.PersistentVolume) bool {
-	return pv.ObjectMeta.DeletionTimestamp == nil && !slice.ContainsString(pv.ObjectMeta.Finalizers, volumeutil.PVProtectionFinalizer, nil)
 }

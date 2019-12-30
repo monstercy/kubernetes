@@ -17,7 +17,7 @@ limitations under the License.
 package predicates
 
 import (
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
 )
@@ -60,7 +60,7 @@ func FilterPodsByNamespace(pods []*v1.Pod, ns string) []*v1.Pod {
 
 // CreateSelectorFromLabels is used to define a selector that corresponds to the keys in a map.
 func CreateSelectorFromLabels(aL map[string]string) labels.Selector {
-	if aL == nil || len(aL) == 0 {
+	if len(aL) == 0 {
 		return labels.Everything()
 	}
 	return labels.Set(aL).AsSelector()
@@ -76,4 +76,14 @@ func portsConflict(existingPorts schedulernodeinfo.HostPortInfo, wantPorts []*v1
 	}
 
 	return false
+}
+
+// SetPredicatesOrderingDuringTest sets the predicatesOrdering to the specified
+// value, and returns a function that restores the original value.
+func SetPredicatesOrderingDuringTest(value []string) func() {
+	origVal := predicatesOrdering
+	predicatesOrdering = value
+	return func() {
+		predicatesOrdering = origVal
+	}
 }

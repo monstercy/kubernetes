@@ -30,6 +30,7 @@ import (
 	errorsutil "k8s.io/apimachinery/pkg/util/errors"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
+	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
 )
 
@@ -42,7 +43,7 @@ func MarshalToYaml(obj runtime.Object, gv schema.GroupVersion) ([]byte, error) {
 // TODO: Is specifying the gv really needed here?
 // TODO: Can we support json out of the box easily here?
 func MarshalToYamlForCodecs(obj runtime.Object, gv schema.GroupVersion, codecs serializer.CodecFactory) ([]byte, error) {
-	mediaType := "application/yaml"
+	const mediaType = runtime.ContentTypeYAML
 	info, ok := runtime.SerializerInfoForMediaType(codecs.SupportedMediaTypes(), mediaType)
 	if !ok {
 		return []byte{}, errors.Errorf("unsupported media type %q", mediaType)
@@ -61,7 +62,7 @@ func UnmarshalFromYaml(buffer []byte, gv schema.GroupVersion) (runtime.Object, e
 // TODO: Is specifying the gv really needed here?
 // TODO: Can we support json out of the box easily here?
 func UnmarshalFromYamlForCodecs(buffer []byte, gv schema.GroupVersion, codecs serializer.CodecFactory) (runtime.Object, error) {
-	mediaType := "application/yaml"
+	const mediaType = runtime.ContentTypeYAML
 	info, ok := runtime.SerializerInfoForMediaType(codecs.SupportedMediaTypes(), mediaType)
 	if !ok {
 		return nil, errors.Errorf("unsupported media type %q", mediaType)
@@ -73,8 +74,8 @@ func UnmarshalFromYamlForCodecs(buffer []byte, gv schema.GroupVersion, codecs se
 
 // SplitYAMLDocuments reads the YAML bytes per-document, unmarshals the TypeMeta information from each document
 // and returns a map between the GroupVersionKind of the document and the document bytes
-func SplitYAMLDocuments(yamlBytes []byte) (map[schema.GroupVersionKind][]byte, error) {
-	gvkmap := map[schema.GroupVersionKind][]byte{}
+func SplitYAMLDocuments(yamlBytes []byte) (kubeadmapi.DocumentMap, error) {
+	gvkmap := kubeadmapi.DocumentMap{}
 	knownKinds := map[string]bool{}
 	errs := []error{}
 	buf := bytes.NewBuffer(yamlBytes)
